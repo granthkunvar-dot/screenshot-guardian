@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Screenshot Snip</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    html, body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: #000;
+      cursor: crosshair;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    #screen-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    #overlay-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      pointer-events: none;
+    }
+    .snip-hint-bar {
+      position: fixed;
+      top: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 10px 22px;
+      background: rgba(13, 15, 20, 0.88);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 99px;
+      color: #f1f5f9;
+      font-size: 13px;
+      font-weight: 500;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 20px rgba(167, 139, 250, 0.2);
+      backdrop-filter: blur(12px);
+      z-index: 1000;
+      pointer-events: none;
+      animation: fadeInDown 0.25s ease both;
+    }
+    @keyframes fadeInDown {
+      from { opacity: 0; transform: translate(-50%, -15px); }
+      to   { opacity: 1; transform: translate(-50%, 0); }
+    }
+    .hint-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .hint-key {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 7px;
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 4px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #38bdf8;
+    }
+    .hint-divider {
+      width: 1px;
+      height: 14px;
+      background: rgba(255, 255, 255, 0.15);
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="screen-canvas"></canvas>
+<canvas id="overlay-canvas"></canvas>
+
+<div class="snip-hint-bar">
+  <div class="hint-item">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2.2"><path d="M6 3h12a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z"/><circle cx="9" cy="9" r="2"/></svg>
+    <span>Drag to snip region</span>
+  </div>
+  <div class="hint-divider"></div>
+  <div class="hint-item">
+    <span class="hint-key">Enter</span>
+    <span>Full screen</span>
+  </div>
+  <div class="hint-divider"></div>
+  <div class="hint-item">
+    <span class="hint-key">Esc</span>
+    <span>Cancel</span>
+  </div>
+</div>
+
+<script>
+  const screenCanvas = document.getElementById('screen-canvas');
+  const overlayCanvas = document.getElementById('overlay-canvas');
+  const sctx = screenCanvas.getContext('2d');
+  const octx = overlayCanvas.getContext('2d');
+
+  let baseImage = null;
+  let isDragging = false;
+  let startX = 0;
+  let startY = 0;
+  let currentRect = null;
+
+  function resizeCanvases() {
+    screenCanvas.width  = window.innerWidth;
+    screenCanvas.height = window.innerHeight;
+    overlayCanvas.width  = window.innerWidth;
+    overlayCanvas.height = window.innerHeight;
+    if (baseImage) {
+      sctx.drawImage(baseImage, 0, 0, screenCanvas.width, screenCanvas.height);
+      drawOverlay();
+    }
+  }
+  window.addEventListener('resize', resizeCanvases);
+
+  // Listen for initial screen image from main process
+  window.electronAPI.onInitSnipImage((data) => {
+    const img = new Image();
+    img.onload = () => {
+      baseImage = img;
+      resizeCanvases();
+      sctx.drawImage(baseImage, 0, 0, screenCanvas.width, screenCanvas.height);
+      drawOverlay();
+    };
+    img.src = 'data:image/png;base64,' + data.base64;
+  });
+
+  // Mouse interaction
+  window.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    isDragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    currentRect = { x: startX, y: startY, w: 0, h: 0 };
+    drawOverlay();
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    const x = Math.min(startX, e.clientX);
+    const y = Math.min(startY, e.clientY);
+    const w = Math.abs(e.clientX - startX);
+    const h = Math.abs(e.clientY - startY);
+    currentRect = { x, y, w, h };
+    drawOverlay();
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (!isDragging) return;
+    isDragging = false;
+
+    if (currentRect && currentRect.w > 8 && currentRect.h > 8) {
+      completeCrop(currentRect);
+    } else {
+      currentRect = null;
+      drawOverlay();
+    }
+  });
+
+  // Double click = capture full screen
+  window.addEventListener('dblclick', () => {
+    captureFullScreen();
+  });
+
+  // Keyboard controls
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      window.electronAPI.cancelSnip();
+    } else if (e.key === 'Enter') {
+      if (currentRect && currentRect.w > 8 && currentRect.h > 8) {
+        completeCrop(currentRect);
+      } else {
+        captureFullScreen();
+      }
+    }
+  });
+
+  function drawOverlay() {
+    octx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+    // Dimmed curtain over entire screen
+    octx.fillStyle = 'rgba(8, 10, 15, 0.45)';
+    octx.fillRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+    if (currentRect && currentRect.w > 0 && currentRect.h > 0) {
+      const { x, y, w, h } = currentRect;
+
+      // Cut out the selected region
+      octx.clearRect(x, y, w, h);
+
+      // Glowing selection border
+      octx.save();
+      octx.strokeStyle = '#38bdf8';
+      octx.lineWidth = 2;
+      octx.shadowColor = 'rgba(56, 189, 248, 0.6)';
+      octx.shadowBlur = 10;
+      octx.strokeRect(x, y, w, h);
+
+      // Corner handles
+      octx.fillStyle = '#a78bfa';
+      octx.shadowBlur = 0;
+      const hw = 6;
+      octx.fillRect(x - hw/2, y - hw/2, hw, hw);
+      octx.fillRect(x + w - hw/2, y - hw/2, hw, hw);
+      octx.fillRect(x - hw/2, y + h - hw/2, hw, hw);
+      octx.fillRect(x + w - hw/2, y + h - hw/2, hw, hw);
+
+      // Dimension pill
+      const label = `${Math.round(w)} × ${Math.round(h)}`;
+      octx.font = '600 11px Inter, sans-serif';
+      const textW = octx.measureText(label).width;
+      const pillW = textW + 16;
+      const pillH = 22;
+      const pillX = x + w/2 - pillW/2;
+      const pillY = y + h + 6 > overlayCanvas.height - 30 ? y - pillH - 6 : y + h + 6;
+
+      octx.fillStyle = 'rgba(13, 15, 20, 0.9)';
+      octx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      octx.lineWidth = 1;
+      roundRect(octx, pillX, pillY, pillW, pillH, 6);
+      octx.fill();
+      octx.stroke();
+
+      octx.fillStyle = '#f1f5f9';
+      octx.fillText(label, pillX + 8, pillY + 15);
+      octx.restore();
+    }
+  }
+
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  }
+
+  function completeCrop(rect) {
+    if (!baseImage) return;
+
+    // Scale calculation between rendered canvas and native image
+    const scaleX = baseImage.width  / screenCanvas.width;
+    const scaleY = baseImage.height / screenCanvas.height;
+
+    const cropX = Math.round(rect.x * scaleX);
+    const cropY = Math.round(rect.y * scaleY);
+    const cropW = Math.round(rect.w * scaleX);
+    const cropH = Math.round(rect.h * scaleY);
+
+    if (cropW < 4 || cropH < 4) return;
+
+    const cropCanvas = document.createElement('canvas');
+    cropCanvas.width = cropW;
+    cropCanvas.height = cropH;
+    const cctx = cropCanvas.getContext('2d');
+
+    cctx.drawImage(
+      baseImage,
+      cropX, cropY, cropW, cropH,
+      0, 0, cropW, cropH
+    );
+
+    const base64 = cropCanvas.toDataURL('image/png').split(',')[1];
+    window.electronAPI.completeSnip({ base64 });
+  }
+
+  function captureFullScreen() {
+    if (!baseImage) return;
+    const fullCanvas = document.createElement('canvas');
+    fullCanvas.width = baseImage.width;
+    fullCanvas.height = baseImage.height;
+    const cctx = fullCanvas.getContext('2d');
+    cctx.drawImage(baseImage, 0, 0);
+    const base64 = fullCanvas.toDataURL('image/png').split(',')[1];
+    window.electronAPI.completeSnip({ base64 });
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,68 @@
+{
+  "name": "screenshot-guardian",
+  "version": "1.0.0",
+  "description": "Analyzes screenshots for sensitive data before sharing",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win",
+    "pack": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir"
+  },
+  "keywords": [
+    "screenshot",
+    "privacy",
+    "security",
+    "pii"
+  ],
+  "author": "Screenshot Guardian",
+  "license": "MIT",
+  "devDependencies": {
+    "cross-env": "^10.1.0",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0"
+  },
+  "dependencies": {
+    "jimp": "^0.22.10",
+    "jsqr": "^1.4.0",
+    "screenshot-desktop": "^1.15.7",
+    "tesseract.js": "^5.0.4"
+  },
+  "build": {
+    "appId": "com.screenshotguardian.app",
+    "productName": "Screenshot Guardian",
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "signingHashAlgorithms": null,
+      "sign": null
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "node_modules/**/*"
+    ],
+    "directories": {
+      "output": "dist"
+    }
+  }
+}
